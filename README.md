@@ -26,13 +26,16 @@ Windows receivers do not contain Xiaomi credentials or MiBeacon bindkeys, identi
 | Model | Local entities | Optional cloud functionality |
 |---|---|---|
 | `xiaomi.sensor_ht.new3pr`, PID 39609 | CO₂, temperature, humidity, battery | CO₂ and temperature/humidity have separate switches; battery is local only |
+| `miaomiaoce.sensor_ht.t2` (LYWSD03MMC), PID 1371 / `0x055B` | Temperature, humidity, battery | Temperature/humidity via the shared opt-in switch; battery is local only |
 | `xiaomi.scales.ms110`, PID 19205 | Broadcast weight; local GATT history through ESPHome | GATT-first native records, or one weight-only fallback, for the configured fixed/nearest profile |
 
-Support is limited to these models. This is not a general Xiaomi Cloud uploader.
+Support is limited to these models. This is not a general Xiaomi Cloud uploader. See [model/property mappings](docs/MODEL-MAPPINGS.md).
 
 ### Environmental reporting
 
-Only fields in the current authenticated broadcast are eligible. Temperature/humidity require live HA reception after enabling; restored values and discovery-cache replay cannot initiate their upload. Temperature uses `7.1001`, humidity `7.1002`, and CO₂ `8.1029`.
+Only fields in the current authenticated broadcast are eligible. Temperature/humidity require live HA reception after enabling; restored values and discovery-cache replay cannot initiate their upload. For new3pr, temperature uses `7.1001`, integral humidity `7.1002`, and CO₂ `8.1029`. T2 uses float temperature `2.1` and float humidity `2.2`, preserving fractional humidity; neither battery nor CO₂ is uploaded for T2. Only MIC-authenticated encrypted MiBeacon V5 frames are accepted.
+
+Existing entries do not automatically select newly supported devices: select them in Devices first. The global temperature/humidity switch defaults to off and is independent of CO₂. The first frame establishes a baseline; counters are never reset by changing upload options.
 
 Selected fields from one frame are reported in one request. Every expected property must have a matching successful acknowledgement; incomplete, duplicate or partially rejected acknowledgements are not presented as full success. Last-batch and per-field status are available in diagnostics.
 

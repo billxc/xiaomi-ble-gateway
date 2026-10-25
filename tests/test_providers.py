@@ -269,6 +269,40 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             {"did": DID, "siid": 8, "piid": 1029, "value": 800}]})
         self.assertTrue(self.cloud.session.reply.released)
 
+    async def test_t2_selection_bindkey_float_map_and_model_limits(self):
+        row = metadata(model=p.T2_MODEL, name="Synthetic T2")
+        self.cloud.rows = [row]
+        self.entry.cloud_devices = {DID: row}
+        [device] = await p.get_devices(self.hass, "auto")
+        self.assertEqual(device.model, p.T2_MODEL)
+        self.reply({"beaconkey": KEY.hex()})
+        self.assertEqual(await p.get_bindkey(self.hass, "auto", device), KEY)
+        self.assertEqual(self.cloud.session.calls[-1][1]["headers"]["MIOT-REQUEST-MODEL"], p.T2_MODEL)
+        self.reply([acknowledgement(siid=2, piid=2), acknowledgement(siid=2, piid=1)])
+        await p.report_environment(self.hass, "auto", device,
+                                   {"temperature": -12.30000001, "humidity": 56.70000001})
+        props = self.cloud.prepared[-1][2]["props"]
+        self.assertEqual(props, [
+            {"did": DID, "siid": 2, "piid": 1, "value": -12.3},
+            {"did": DID, "siid": 2, "piid": 2, "value": 56.7}])
+        self.assertTrue(all(type(prop["value"]) is float for prop in props))
+        count = len(self.cloud.session.calls)
+        for readings in ({"co2": 650}, {"battery": 87}, {"humidity": True},
+                         {"humidity": 100.1}, {"temperature": float("nan")}):
+            with self.assertRaisesRegex(p.ProviderError, "INVALID_VALUE"):
+                await p.report_environment(self.hass, "auto", device, readings)
+        with self.assertRaisesRegex(p.ProviderError, "UNSUPPORTED_UPLOAD"):
+            await p.report_co2(self.hass, "auto", device, 650)
+        # T2 still uses exact per-property ACKs, not the old new3pr property IDs.
+        self.reply([acknowledgement(siid=7, piid=1002)])
+        with self.assertRaisesRegex(p.ProviderError, "UNKNOWN"):
+            await p.report_environment(self.hass, "auto", device, {"humidity": 56.7})
+        self.assertEqual(len(self.cloud.session.calls), count + 1)
+        self.cloud.rows = [metadata(model=p.T2_MODEL, mac="ABCDEF123456")]
+        with self.assertRaisesRegex(p.ProviderError, "DEVICE_NOT_VERIFIED"):
+            await p.get_bindkey(self.hass, "auto", device)
+        self.assertEqual(len(self.cloud.session.calls), count + 1)
+
     async def test_environment_float_values_are_preserved(self):
         for temperature, humidity in ((0.0, 0.0), (-12.3, 54.0), (23, 55),
                                       (-30, 55.0), (100.0, 100.0)):

@@ -54,9 +54,11 @@ DEFAULT_RECORD_RAW = True
 DEFAULT_RETENTION_DAYS = 3
 DATA_RECORDER_MANAGER = "recorder_manager"
 FE95_UUID = "0000fe95-0000-1000-8000-00805f9b34fb"
-MODEL_PIDS = {"xiaomi.sensor_ht.new3pr": 39609, "xiaomi.scales.ms110": 19205}
 CO2_MODEL = "xiaomi.sensor_ht.new3pr"
+T2_MODEL = "miaomiaoce.sensor_ht.t2"
 SCALE_MODEL = "xiaomi.scales.ms110"
+ENVIRONMENT_MODELS = {CO2_MODEL, T2_MODEL}
+MODEL_PIDS = {CO2_MODEL: 39609, T2_MODEL: 1371, SCALE_MODEL: 19205}
 
 
 def bluetooth_address(mac: str) -> str:

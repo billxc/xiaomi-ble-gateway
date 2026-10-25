@@ -1,7 +1,7 @@
 """Read-only runtime diagnostics; never expose account credentials or bindkeys."""
 from homeassistant.components import bluetooth
 
-from .const import CO2_MODEL, FE95_UUID, SCALE_MODEL, WEIGHT_MODE_FIXED
+from .const import ENVIRONMENT_MODELS, FE95_UUID, SCALE_MODEL, WEIGHT_MODE_FIXED
 from .recorder_manager import get_recorder_manager
 from .protocol import decode_advertisement
 
@@ -23,7 +23,7 @@ async def async_get_config_entry_diagnostics(hass, entry):
                 'decode_error': runtime.decode_errors.get(mac),
                 'upload_error': runtime.upload_errors.get(mac),
                 'cached_frame': 'not_seen'}
-        if device.model == CO2_MODEL:
+        if device.model in ENVIRONMENT_MODELS:
             item.update(
                 last_environment_upload=runtime.last_environment_upload.get(mac),
                 environment_fields=runtime.environment_fields.get(mac, {}),

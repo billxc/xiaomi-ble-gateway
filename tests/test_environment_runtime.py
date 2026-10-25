@@ -105,11 +105,11 @@ class EnvironmentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.runtime = self.make_runtime()
         self.addAsyncCleanup(self.stop_worker)
 
-    def make_runtime(self, co2=False, th=True, epoch=1):
+    def make_runtime(self, co2=False, th=True, epoch=1, model=c.CO2_MODEL):
         entry = NS(entry_id="offline", data={c.CONF_ACCOUNT_ID: "synthetic",
                    c.CONF_DEVICES: [MAC], c.CONF_UPLOAD: co2,
                    c.CONF_TH_UPLOAD: th, c.CONF_TH_ENABLED_AT: epoch})
-        device = NS(mac=MAC, model=c.CO2_MODEL)
+        device = NS(mac=MAC, model=model)
         runtime = r.GatewayRuntime(NS(), entry, [device], {MAC: b""}, co2)
         runtime._started_at = asyncio.get_running_loop().time() - 1
         runtime.states[MAC].observe(10, {"temperature": 99.9, "humidity": 99.9})
@@ -120,7 +120,7 @@ class EnvironmentRuntimeTests(unittest.IsolatedAsyncioTestCase):
                   source=source)
         if seen != "missing":
             info.time = asyncio.get_running_loop().time() if seen == "live" else seen
-        frame = NS(counter=counter, product_id=c.MODEL_PIDS[c.CO2_MODEL],
+        frame = NS(counter=counter, product_id=c.MODEL_PIDS[self.runtime.devices[MAC].model],
                    readings=readings, metadata={})
         with patch.object(r, "decode_advertisement", return_value=frame):
             self.runtime._on_advertisement(info, None)
@@ -136,6 +136,27 @@ class EnvironmentRuntimeTests(unittest.IsolatedAsyncioTestCase):
             worker.cancel()
             with suppress(asyncio.CancelledError):
                 await worker
+
+    async def test_t2_th_without_co2_cache_and_duplicates(self):
+        self.runtime = self.make_runtime(model=c.T2_MODEL)
+        await self.runtime.async_prepare()
+        self.assertEqual(self.runtime.states[MAC].cloud_status, "waiting")
+        self.frame({"temperature": 99.0}, seen=self.runtime._started_at - 1)
+        for source in ("proxy-a", "proxy-b"):
+            self.frame({"temperature": -12.3, "humidity": 56.7, "battery": 87},
+                       counter=12, source=source)
+        await self.drain()
+        self.report.assert_awaited_once()
+        self.assertEqual(self.report.call_args.args[-1], {"temperature": -12.3, "humidity": 56.7})
+        self.assertEqual(self.runtime.store.saved[-1]["devices"][MAC]["last_attempt"], 12)
+        await self.stop_worker()
+        self.report.reset_mock()
+        self.runtime = self.make_runtime(co2=True, th=False, model=c.T2_MODEL)
+        await self.runtime.async_prepare()
+        self.assertEqual(self.runtime.states[MAC].cloud_status, "disabled")
+        self.frame({"co2": 650, "temperature": 22.3})
+        await self.drain()
+        self.report.assert_not_awaited()
 
     async def test_th_only_fresh_batch_and_durable_gate(self):
         await self.runtime.async_prepare()

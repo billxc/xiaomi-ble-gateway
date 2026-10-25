@@ -17,6 +17,7 @@ import time
 from typing import Any
 from copy import deepcopy
 
+from .const import CO2_MODEL, ENVIRONMENT_MODELS, SCALE_MODEL, T2_MODEL
 from .scale_native import build_native_record, native_measurement, native_record_matches
 from .scale_weight import (
     build_weight_record, decimal_weight, record_data, record_matches,
@@ -25,9 +26,11 @@ from .scale_weight import (
 )
 
 
-CO2_MODEL = "xiaomi.sensor_ht.new3pr"
-SCALE_MODEL = "xiaomi.scales.ms110"
-_MODELS = {CO2_MODEL, SCALE_MODEL}
+_MODELS = ENVIRONMENT_MODELS | {SCALE_MODEL}
+_ENVIRONMENT_PROPERTIES = {
+    CO2_MODEL: {"co2": (8, 1029), "temperature": (7, 1001), "humidity": (7, 1002)},
+    T2_MODEL: {"temperature": (2, 1), "humidity": (2, 2)},
+}
 
 
 class ProviderError(Exception):
@@ -341,13 +344,14 @@ async def report_environment(hass, account_id, device: DeviceRef, readings: dict
 
     Temperature uses the official [-30, 100] Celsius range; three decimals
     remove IEEE754 tails without smoothing (the device spec resolution is 0.1C).
-    Integral humidity in [0, 100] is normalized to its official uint8 format.
+    New3pr humidity is integral uint8; T2 temperature/humidity are floats.
+    Battery is local only; T2 has no CO2 upload property.
     None means every exact property was acked with integer code zero; UNKNOWN
     must never authorize an automatic resend.
     """
-    if not isinstance(device, DeviceRef) or device.model != CO2_MODEL:
+    if not isinstance(device, DeviceRef) or device.model not in ENVIRONMENT_MODELS:
         raise ProviderError("UNSUPPORTED_UPLOAD: environment reporting requires the verified model")
-    properties = {"co2": (8, 1029), "temperature": (7, 1001), "humidity": (7, 1002)}
+    properties = _ENVIRONMENT_PROPERTIES[device.model]
     if not isinstance(readings, dict) or not readings or readings.keys() - properties.keys():
         raise ProviderError("INVALID_VALUE: invalid environment selection")
     props = []
@@ -362,10 +366,13 @@ async def report_environment(hass, account_id, device: DeviceRef, readings: dict
                     valid = -30 <= value <= 100
                 else:
                     valid = (0 <= value <= 100
-                             and (type(value) is int or value.is_integer()))
+                             and (device.model == T2_MODEL
+                                  or type(value) is int or value.is_integer()))
         if not valid:
             raise ProviderError("INVALID_VALUE: invalid environment measurement")
-        if key == "humidity":
+        if device.model == T2_MODEL:
+            value = round(float(value), 3)
+        elif key == "humidity":
             value = int(value)
         elif key == "temperature":
             value = round(value, 3)

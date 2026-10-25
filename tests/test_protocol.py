@@ -62,6 +62,35 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(compact.readings, result.readings)
         self.assertNotIn("key", result.metadata)
 
+    def test_t2_legacy_eids_authenticated_and_pid_scoped(self):
+        for plain in (
+            _tlv(0x1004, struct.pack("<h", -123))
+            + _tlv(0x1006, struct.pack("<H", 567)),
+            _tlv(0x100D, struct.pack("<hH", -123, 567)),
+        ):
+            plain += _tlv(0x100A, b"\x57") + _tlv(0x601D, b"\x01\x00")
+            raw = _frame(plain, pid=1371)
+            result = decode_advertisement(raw, _ADDRESS, _KEY)
+            self.assertEqual(result.readings, {
+                "temperature": -12.3, "humidity": 56.7, "battery": 87.0})
+            self.assertEqual(result.counter, 0x030201FE)
+            self.assertEqual(result.metadata["model"], "miaomiaoce.sensor_ht.t2")
+            self.assertTrue(result.metadata["mic_verified"])
+            with self.assertRaisesRegex(ValueError, "MIC"):
+                decode_advertisement(raw[:-1] + bytes([raw[-1] ^ 1]), _ADDRESS, _KEY)
+        legacy = _tlv(0x100D, struct.pack("<hH", -123, 567))
+        for pid in (39609, 19205):
+            self.assertEqual(decode_advertisement(
+                _frame(legacy, pid=pid), _ADDRESS, _KEY).readings, {})
+        for eid, size in ((0x1004, 2), (0x1006, 2), (0x100D, 4), (0x100A, 1)):
+            for bad_size in (size - 1, size + 1):
+                with self.subTest(eid=eid, size=bad_size), self.assertRaises(ValueError):
+                    decode_advertisement(_frame(_tlv(eid, bytes(bad_size)), pid=1371),
+                                         _ADDRESS, _KEY)
+        for control in (0x4848, 0x5840):
+            self.assertIsNone(decode_advertisement(
+                _frame(legacy, pid=1371, control=control), _ADDRESS, _KEY))
+
     def test_scale_weight_tag_and_sentinel(self):
         result = decode_advertisement(_scale(650), _ADDRESS, _KEY)
         self.assertEqual(result.readings, {"weight_kg": 65.0})
@@ -81,7 +110,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_basic_and_unsupported_do_not_produce_readings(self):
         mac = bytes.fromhex(_ADDRESS.replace(":", ""))[::-1]
-        for pid in (39609, 19205):
+        for pid in (39609, 1371, 19205):
             self.assertIsNone(decode_advertisement(struct.pack("<HHB", 0x5910, pid, 1) + mac, _ADDRESS, b""))
         self.assertIsNone(decode_advertisement(_frame(b"", pid=12345), _ADDRESS, _KEY))
         # A scale EID under the CO2 PID must not become a scale measurement.

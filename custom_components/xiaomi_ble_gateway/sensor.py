@@ -8,7 +8,8 @@ from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceIn
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import EntityCategory
 
-from .const import CO2_MODEL, DOMAIN, SCALE_MODEL, WEIGHT_MODE_FIXED, bluetooth_address
+from .const import (CO2_MODEL, DOMAIN, ENVIRONMENT_MODELS, SCALE_MODEL, T2_MODEL,
+                    WEIGHT_MODE_FIXED, bluetooth_address)
 
 _DESCRIPTIONS = {
     "co2": SensorEntityDescription(
@@ -42,11 +43,20 @@ _DESCRIPTIONS = {
 }
 
 
+_MODEL_FIELDS = {
+    CO2_MODEL: ("co2", "temperature", "humidity", "battery"),
+    T2_MODEL: ("temperature", "humidity", "battery"),
+    SCALE_MODEL: ("weight_kg",),
+}
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     runtime = entry.runtime_data
     entities = []
     for device in runtime.devices.values():
-        keys = ("co2", "temperature", "humidity", "battery") if device.model == CO2_MODEL else ("weight_kg",)
+        keys = _MODEL_FIELDS.get(device.model)
+        if keys is None:
+            continue
         entities.extend(GatewaySensor(runtime, device, _DESCRIPTIONS[key])
                         for key in (*keys, "cloud_status"))
     async_add_entities(entities)
@@ -81,9 +91,9 @@ class GatewaySensor(RestoreSensor):
         attrs = {"last_counter": state.counter, "cloud_status": state.cloud_status}
         if self.entity_description.key == "cloud_status":
             attrs["last_attempt_counter"] = state.last_attempt
-            if self.device.model == CO2_MODEL:
+            if self.device.model in ENVIRONMENT_MODELS:
                 attrs.update(
-                    co2_upload_enabled=self.runtime.upload,
+                    co2_upload_enabled=(self.device.model == CO2_MODEL and self.runtime.upload),
                     temperature_humidity_upload_enabled=self.runtime.th_enabled,
                     temperature_humidity_upload_enabled_at=self.runtime.th_enabled_at,
                     last_environment_upload=self.runtime.last_environment_upload.get(self.device.mac),

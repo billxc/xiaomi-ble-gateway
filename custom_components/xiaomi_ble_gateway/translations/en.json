@@ -37,7 +37,7 @@
       },
       "environment_upload": {
         "title": "Temperature/humidity cloud uploads (off by default)",
-        "description": "Saving reloads the integration. Upload only temperature/humidity (property7.1001/7.1002) read from the current fresh live callback of selected new3pr devices after enabling. CO₂ (property8.1029) remains independently controlled. Authorized fields in one frame form one batch: no waiting or merging across frames. No battery, history, HA cache or restored values. Only HA reception freshness is verified, not device measurement time. The first frame only establishes a baseline. Disabling never clears counters or backfills data; no user profile is required. Success requires every property to acknowledge; partial or unknown results are not retried.",
+        "description": "Saving reloads the integration. Upload only temperature/humidity read from the current fresh live callback of explicitly selected new3pr (property7.1001/7.1002) or T2 / LYWSD03MMC (property2.1/2.2, floats) devices after enabling. Newly supported devices must be selected in Devices first. CO₂ (property8.1029) remains independently controlled. Authorized fields in one frame form one batch: no waiting or merging across frames. No battery, history, HA cache or restored values. Only HA reception freshness is verified, not device measurement time. The first frame only establishes a baseline. Disabling never clears counters or backfills data; no user profile is required. Success requires every property to acknowledge; partial or unknown results are not retried.",
         "data": {"enable_temperature_humidity_upload": "Enable temperature/humidity cloud uploads"}
       },
       "recording": {

@@ -14,7 +14,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
 
 from . import providers
-from .const import (CO2_MODEL, DOMAIN, FE95_UUID, MODEL_PIDS, SCALE_MODEL,
+from .const import (CO2_MODEL, DOMAIN, ENVIRONMENT_MODELS, FE95_UUID, MODEL_PIDS, SCALE_MODEL,
                     DEFAULT_WEIGHT_MODE, DEFAULT_WEIGHT_THRESHOLD,
                     WEIGHT_MODE_FIXED, WEIGHT_MODE_NEAREST, WEIGHT_NEAREST_AUDIT_KEY,
                     bluetooth_address, environment_config,
@@ -142,7 +142,7 @@ class GatewayRuntime:
             if device.model == SCALE_MODEL:
                 self.states[mac].cloud_status = (
                     "waiting_weight" if self.weight_active(mac) else "weight_upload_disabled")
-            elif not (self.upload or self.th_enabled):
+            elif not (self.th_enabled or (device.model == CO2_MODEL and self.upload)):
                 self.states[mac].cloud_status = "disabled"
             elif self.states[mac].cloud_status == "disabled":
                 self.states[mac].cloud_status = "waiting"
@@ -221,10 +221,10 @@ class GatewayRuntime:
         kind, value = None, None
         environment_readings = {}
         device_time = frame.metadata.get("device_time")
-        if device.model == CO2_MODEL:
+        if device.model in ENVIRONMENT_MODELS:
             if observation is Observation.NEW:
                 # One complete FE95 payload, never merged with state.readings.
-                if self.upload and "co2" in frame.readings:
+                if device.model == CO2_MODEL and self.upload and "co2" in frame.readings:
                     environment_readings["co2"] = int(frame.readings["co2"])
                 seen_at = getattr(service_info, "time", None)
                 # TH has no device RTC: this verifies reception freshness only,
@@ -240,7 +240,8 @@ class GatewayRuntime:
                             environment_readings[key] = float(frame.readings[key])
                 if environment_readings:
                     kind = "environment"
-            elif observation is Observation.BASELINE and (self.upload or self.th_enabled):
+            elif observation is Observation.BASELINE and (
+                    self.th_enabled or (device.model == CO2_MODEL and self.upload)):
                 state.cloud_status = "baseline"
         elif device.model == SCALE_MODEL and self.weight_active(mac):
             # HA may replay discovery cache while registering a callback. A

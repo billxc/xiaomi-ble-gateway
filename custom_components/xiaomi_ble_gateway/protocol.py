@@ -1,4 +1,4 @@
-"""Pure, authenticated MiBeacon V5 decoding for two explicitly supported PIDs.
+"""Pure, authenticated MiBeacon V5 decoding for explicitly supported PIDs.
 
 Input is the FE95 service-data payload WITHOUT its 95fe UUID. No I/O or
 replay/dedup state is kept here; callers must deduplicate only after MIC success.
@@ -22,7 +22,15 @@ class DecodedFrame:
     metadata: dict
 
 
-_MODELS = {39609: "xiaomi.sensor_ht.new3pr", 19205: "xiaomi.scales.ms110"}
+# Keep this pure module directly loadable by offline tests/replay tools.
+_MODELS = {39609: "xiaomi.sensor_ht.new3pr", 1371: "miaomiaoce.sensor_ht.t2",
+           19205: "xiaomi.scales.ms110"}
+_T2_FIELDS = {
+    0x1004: (("temperature",), "<h", 10),
+    0x1006: (("humidity",), "<H", 10),
+    0x100D: (("temperature", "humidity"), "<hH", 10),
+    0x100A: (("battery",), "<B", 1),
+}
 # Only EIDs already used by the target's researched decoder, not generic MiBeacon
 # heuristics (in particular, do not interpret arbitrary battery-like objects).
 _CO2_FIELDS = {
@@ -120,6 +128,12 @@ def decode_advertisement(
             if not math.isfinite(number):
                 raise ValueError("Non-finite sensor measurement")
             readings[name] = number
+        elif product_id == 1371 and eid in _T2_FIELDS:
+            names, fmt, divisor = _T2_FIELDS[eid]
+            if size != struct.calcsize(fmt):
+                raise ValueError("Invalid known T2 sensor object length")
+            readings.update((name, number / divisor)
+                            for name, number in zip(names, struct.unpack(fmt, value)))
         elif product_id == 19205 and eid == 0x6E16:
             if size != 9:
                 raise ValueError("Invalid scale object length")
