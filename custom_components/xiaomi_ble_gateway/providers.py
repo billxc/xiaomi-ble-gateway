@@ -17,6 +17,7 @@ import time
 from typing import Any
 from copy import deepcopy
 
+from .scale_native import build_native_record, native_measurement, native_record_matches
 from .scale_weight import (
     build_weight_record, decimal_weight, record_data, record_matches,
     same_identity, same_measurement_time, validate_user, nearest_weight_reference,
@@ -436,7 +437,7 @@ async def _scale_profiles(cloud, device):
     return profiles
 
 
-async def _scale_records(cloud, device, expected):
+async def _scale_records(cloud, device, expected, *, native=False):
     timestamp = expected["createTime"]
     rows = await _request(cloud, device.model, "eco/common/scale/getUserDataByPage", {
         "model": device.model, "uid": expected["uid"], "did": device.did,
@@ -449,21 +450,33 @@ async def _scale_records(cloud, device, expected):
     matches = []
     try:
         for row in rows:
-            record_data(row)
+            if native:
+                if not isinstance(row, dict) or not isinstance(row.get("data"), str):
+                    raise ValueError("UNKNOWN: invalid scale record shape")
+                data = json.loads(row["data"])
+                times = (row.get("createTime"), data.get("time") if isinstance(data, dict) else None)
+                if any(type(value) not in (int, float) or
+                       (type(value) is float and not math.isfinite(value)) for value in times):
+                    raise ValueError("UNKNOWN: invalid scale record timestamps")
+                same_time = (times[0] == expected["createTime"]
+                             or times[1] == expected["createTime"] // 1000)
+            else:
+                record_data(row)
+                same_time = same_measurement_time(row, expected)
             if not same_identity(row, expected):
                 raise ValueError("UNKNOWN: scale history identity mismatch")
-            if same_measurement_time(row, expected):
+            if same_time:
                 matches.append(row)
     except ValueError as err:
         raise ProviderError(str(err)) from None
     return matches
 
 
-def _scale_existing(rows, expected, summary):
+def _scale_existing(rows, expected, summary, matcher=record_matches):
     if len(rows) != 1:
         return {**summary, "status": "existing", "code": "EXISTING_AMBIGUOUS"}
     row = rows[0]
-    if record_matches(row, expected):
+    if matcher(row, expected):
         return {**summary, "status": "existing_verified", "code": "EXISTING_VERIFIED"}
     try:
         different = (decimal_weight(record_data(row).get("weight"))
@@ -525,6 +538,60 @@ async def get_scale_weight_references(hass, account_id, device: DeviceRef) -> li
             return await _scale_references(cloud, device, profiles)
     except TimeoutError:
         raise ProviderError("UNKNOWN: scale reference budget exhausted; do not resend") from None
+
+
+async def report_scale_measurement(hass, account_id, device, *, weight_kg,
+                                   measurement_time, mode, profile_id=None,
+                                   max_difference=2.5, native_record=None) -> dict:
+    """One selected record kind, one write at most, never a downgrade/resend.
+
+    Caller persists its unified attempt BEFORE calling, and owns new-measurement
+    authorization/freshness. measurement_time is the canonical device timestamp.
+    Native weight wins over broadcast weight, including nearest recognition.
+    """
+    _scale_device(device)
+    kind = "native" if native_record is not None else "weight_only"
+    try:
+        if mode not in ("fixed", "nearest"):
+            raise ValueError("INVALID_VALUE: invalid scale selection mode")
+        if type(measurement_time) is not int or measurement_time <= 0:
+            raise ValueError("INVALID_VALUE: measurement_time must be positive Unix seconds")
+        if native_record is not None:
+            data = native_measurement(native_record)
+            if data["time"] != measurement_time:
+                return {"status": "conflict", "code": "NATIVE_TIME_CONFLICT",
+                        "record_kind": kind, "measurement_time": measurement_time}
+            weight_kg = data["weight"]
+        nearest_weight_reference(weight_kg, [], max_difference)
+    except ValueError as err:
+        raise ProviderError(str(err)) from None
+    if mode == "fixed" and (not isinstance(profile_id, str) or not profile_id):
+        raise ProviderError("SCALE_PROFILE_NOT_FOUND: explicitly select a current profile")
+    try:
+        async with asyncio.timeout(180):
+            cloud = await _target(hass, account_id, device)
+            profiles = await _scale_profiles(cloud, device)
+            summary = {"measurement_time": measurement_time, "record_kind": kind,
+                       "weight_kg": float(decimal_weight(weight_kg))}
+            if mode == "nearest":
+                references = await _scale_references(cloud, device, profiles)
+                match = nearest_weight_reference(weight_kg, references, max_difference)
+                summary["references"] = references
+                if match["status"] != "matched":
+                    return {**summary, **match, "code": match["status"].upper()}
+                profile_id = match["matched_profile_id"]
+                summary.update({k: v for k, v in match.items() if k != "status"})
+            selected = [profile for profile in profiles if profile.account_id == profile_id]
+            if len(selected) != 1:
+                raise ProviderError("SCALE_PROFILE_NOT_FOUND: selected profile is no longer available")
+            result = await _report_scale_for_profile(
+                cloud, device, selected[0], weight_kg, measurement_time,
+                native_record=native_record)
+            if result["status"] in ("existing_conflict", "existing"):
+                result = {**result, "status": "conflict"}
+            return {**summary, **result}
+    except TimeoutError:
+        raise ProviderError("UNKNOWN: scale measurement budget exhausted; do not resend") from None
 
 
 async def report_scale_weight_nearest(hass, account_id, device: DeviceRef,
@@ -590,20 +657,34 @@ async def report_scale_weight(hass, account_id, device: DeviceRef, profile_id: s
                                            weight_kg, measurement_time)
 
 
-async def _report_scale_for_profile(cloud, device, profile, weight_kg, measurement_time):
+async def _report_scale_for_profile(cloud, device, profile, weight_kg, measurement_time,
+                                    *, native_record=None):
     """Use the exact selected snapshot; never fetch/reselect a profile after match."""
+    kind = "native" if native_record is not None else "weight_only"
+    matcher = native_record_matches if native_record is not None else record_matches
     try:
-        expected = build_weight_record(model=device.model, did=device.did,
-                                      user=profile.user, weight_kg=weight_kg,
-                                      measurement_time=measurement_time)
+        if native_record is not None:
+            expected = build_native_record(device.model, device.did, profile.user, native_record)
+            data = record_data(expected)
+            weight_kg = data["weight"]
+            if data["time"] != measurement_time:
+                return {"status": "conflict", "code": "NATIVE_TIME_CONFLICT",
+                        "record_kind": kind, "measurement_time": measurement_time}
+        else:
+            expected = build_weight_record(model=device.model, did=device.did,
+                                          user=profile.user, weight_kg=weight_kg,
+                                          measurement_time=measurement_time)
     except ValueError as err:
+        if str(err).startswith("NATIVE_PROFILE_CONFLICT:"):
+            return {"status": "conflict", "code": "NATIVE_PROFILE_CONFLICT",
+                    "record_kind": kind, "measurement_time": measurement_time}
         raise ProviderError(str(err)) from None
     # Return only safe time/weight/status, never the embedded personal profile.
-    summary = {"measurement_time": measurement_time,
+    summary = {"measurement_time": measurement_time, "record_kind": kind,
                "weight_kg": float(decimal_weight(weight_kg))}
-    before = await _scale_records(cloud, device, expected)
+    before = await _scale_records(cloud, device, expected, native=native_record is not None)
     if before:
-        return _scale_existing(before, expected, summary)
+        return _scale_existing(before, expected, summary, matcher)
     try:
         await _request(cloud, device.model, "eco/common/scale/add", expected)
     except ProviderError as err:
@@ -615,9 +696,9 @@ async def _report_scale_for_profile(cloud, device, profile, weight_kg, measureme
     for attempt in range(3):
         if attempt:
             await asyncio.sleep(1)
-        after = await _scale_records(cloud, device, expected)
+        after = await _scale_records(cloud, device, expected, native=native_record is not None)
         if after:
-            if len(after) == 1 and record_matches(after[0], expected):
+            if len(after) == 1 and matcher(after[0], expected):
                 return {**summary, "status": "verified", "code": "READBACK_VERIFIED"}
             raise ProviderError("UNKNOWN: scale readback conflict or ambiguity; do not resend")
     raise ProviderError("UNKNOWN: scale write not confirmed by readback; do not resend")

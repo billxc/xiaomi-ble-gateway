@@ -26,7 +26,7 @@ Windows receivers do not contain Xiaomi credentials or MiBeacon bindkeys, identi
 | Model | Local entities | Optional cloud functionality |
 |---|---|---|
 | `xiaomi.sensor_ht.new3pr`, PID 39609 | CO₂, temperature, humidity, battery | CO₂ and temperature/humidity have separate switches; battery is local only |
-| `xiaomi.scales.ms110`, PID 19205 | Broadcast weight; explicit local GATT history pull through ESPHome | Weight-only history for a fixed profile or the unique nearest-weight profile |
+| `xiaomi.scales.ms110`, PID 19205 | Broadcast weight; local GATT history through ESPHome | GATT-first native records, or one weight-only fallback, for the configured fixed/nearest profile |
 
 Support is limited to these models. This is not a general Xiaomi Cloud uploader.
 
@@ -38,11 +38,13 @@ Selected fields from one frame are reported in one request. Every expected prope
 
 ### Scale reporting is experimental
 
-Weight interpretation is community-derived and is not a complete official body-composition report. The weight-only cloud record follows the official `UserEditor` record shape; placeholder body-composition fields are **not measured zero body fat**. No local BMI/body-fat algorithm or native full-health cloud uploader is implemented here. Native GATT history can be saved locally through an active ESPHome proxy; see [Scale history](docs/SCALE-HISTORY.md).
+Scale uploads are **GATT first**: a fresh broadcast triggers a bounded native-data collection window instead of an immediate cloud write. One finalized native record or weight-only fallback passes through the same persistent upload-attempt gate. Late data and unknown results never append a second record. See [GATT-first upload policy](docs/GATT-FIRST-UPLOAD.md).
+
+Native records preserve all device fields and status, following the official record shape; no local BMI/body-fat algorithm runs here and values are not claimed to be medically validated. Weight-only fallback uses the official `UserEditor` shape; its placeholder composition fields are **not measured zero body fat**. Native data is also stored locally with **no automatic TTL**; see [Scale history](docs/SCALE-HISTORY.md).
 
 Nearest matching compares all profiles associated with that scale against their available weight references. Only a unique closest match within the configured threshold (default **2.5 kg**, inclusive) is uploaded. An exact tie, no reference, or all candidates outside the threshold produces no write. Editable cloud recognition baselines are distinguished from historical references. This is a heuristic, **not identity authentication**; people with similar weights may be misassigned. Fixed-profile mode is also available.
 
-The first live scale upload must satisfy the device-time/reception-time gates. Do not change old timestamps or replay recordings to force an upload.
+A scale upload must satisfy the enable-epoch, device-time, live-reception and current-age gates. Native identity must agree with the configured profile choice. Existing records, ambiguous native data and identity/time conflicts cause no additional write. Do not change old timestamps or replay recordings to force an upload.
 
 ## Install the HA integration
 

@@ -693,6 +693,149 @@ class ScaleProviderTests(unittest.IsolatedAsyncioTestCase):
             await self.report()
         self.assertEqual(len(self.adds()), 1)
 
+    def native(self, *, profile_index=2, weight_raw="6125", status=1):
+        user = self.users[profile_index]
+        user["uid"] = str(9007199254740993123 + profile_index)
+        raw = [str(100 + i) for i in range(34)]
+        raw[:7] = [user["uid"], str(user["accountCode"]), str(user["type"]),
+                   weight_raw, "70", str(status), "1800000000"]
+        # Import under the same synthetic package as providers, not HA.
+        module = sys.modules[p.native_measurement.__module__]
+        return module.parse_native_csv(",".join(["7"] + raw), offline=True)
+
+    async def unified(self, native_record=None, mode="fixed", weight=99):
+        return await p.report_scale_measurement(
+            self.hass, "auto", self.device, weight_kg=weight,
+            measurement_time=1800000000, mode=mode, profile_id="profile-2",
+            native_record=native_record)
+
+    async def test_native_status1_full_schema_uses_native_weight_and_time(self):
+        native = self.native()
+        self.expected = p.build_native_record(p.SCALE_MODEL, DID, self.users[2], native)
+        self.reads = [[], [self.expected]]
+        result = await self.unified(native)
+        self.assertEqual(result["status"], "verified")
+        self.assertEqual(result["record_kind"], "native")
+        self.assertEqual(result["weight_kg"], 61.25)  # NOT broadcast 99
+        self.assertEqual(self.adds(), [self.expected])
+        data = json.loads(self.adds()[0]["data"])
+        self.assertEqual(len(data), 37)
+        self.assertEqual(data["status"], 1)
+        self.assertEqual(data["reportFrom"], "Offline")
+        self.assertGreater(data["bmi"], 0)
+        self.assertGreater(data["bodyResOriginZ50"], 0)
+        self.assertNotIn("user", result)
+        self.assertNotIn("raw_fields", result)
+        self.assertNotIn("synthetic-preserved-field", repr(result))
+
+    async def test_native_nearest_uses_native_not_broadcast_weight(self):
+        native = self.native()
+        self.expected = p.build_native_record(p.SCALE_MODEL, DID, self.users[2], native)
+        self.reads = [[], [self.expected]]
+        self.histories["profile-0"] = [self.history(0, 99)]
+        self.histories["profile-2"] = [self.history(2, 61.2)]
+        result = await self.unified(native, mode="nearest", weight=99)
+        self.assertEqual(result["status"], "verified")
+        self.assertEqual(result["matched_profile_id"], "profile-2")
+        self.assertEqual(result["difference"], 0.05)
+        self.assertEqual(len(self.adds()), 1)
+
+    async def test_native_profile_triple_conflict_never_writes_or_downgrades(self):
+        native = self.native(profile_index=0)
+        self.histories["profile-2"] = [self.history(2, 61.2)]
+        for mode in ("fixed", "nearest"):
+            self.calls.clear()
+            result = await self.unified(native, mode=mode)
+            self.assertEqual(result["status"], "conflict")
+            self.assertEqual(result["code"], "NATIVE_PROFILE_CONFLICT")
+            self.assertEqual(self.adds(), [])
+            self.assertFalse(any(payload.get("endTime") != 0 for api, payload in self.calls
+                                 if api.endswith("getUserDataByPage")))
+        # Check uid separately from duid/type, not merely an accountCode join.
+        native = self.native()
+        self.users[2]["uid"] = "9007199254740993999"
+        self.assertEqual((await self.unified(native))["status"], "conflict")
+        self.assertEqual(self.adds(), [])
+
+    async def test_existing_usereditor_blocks_native_add_never_matches_full(self):
+        native = self.native()
+        editor = self.history(2, 61.25, 1800000000)
+        self.expected = p.build_native_record(p.SCALE_MODEL, DID, self.users[2], native)
+        for rows, status in (([editor], "conflict"), ([self.expected], "existing_verified"),
+                             ([editor, self.expected], "conflict")):
+            self.reads = [rows]
+            result = await self.unified(native)
+            self.assertEqual(result["status"], status)
+            self.assertEqual(result["record_kind"], "native")
+        self.assertEqual(self.adds(), [])
+
+    async def test_native_readback_numeric_equivalence_but_not_missing_body_fields(self):
+        native = self.native()
+        expected = p.build_native_record(p.SCALE_MODEL, DID, self.users[2], native)
+        data = json.loads(expected["data"])
+        numeric = {key: float(value) if type(value) is int else value
+                   for key, value in data.items()}
+        row = {**expected, "createTime": float(expected["createTime"]),
+               "data": json.dumps(numeric)}
+        self.reads = [[row]]
+        self.assertEqual((await self.unified(native))["status"], "existing_verified")
+        numeric.pop("bodyResOriginZ50")
+        self.reads = [[{**row, "data": json.dumps(numeric)}]]
+        self.assertEqual((await self.unified(native))["status"], "conflict")
+        self.assertEqual(self.adds(), [])
+
+    async def test_unknown_native_readback_usereditor_is_not_verified_or_rewritten(self):
+        native = self.native()
+        self.add_error = p.ProviderError("UNKNOWN: synthetic timeout")
+        self.reads = [[], [self.history(2, 61.25, 1800000000)]]
+        with self.assertRaisesRegex(p.ProviderError, "UNKNOWN"):
+            await self.unified(native)
+        self.assertEqual(len(self.adds()), 1)
+        self.assertEqual(json.loads(self.adds()[0]["data"])["reportFrom"], "Offline")
+
+    async def test_unknown_native_add_only_reads_never_second_weight_only_write(self):
+        native = self.native()
+        self.expected = p.build_native_record(p.SCALE_MODEL, DID, self.users[2], native)
+        self.add_error = p.ProviderError("UNKNOWN: synthetic timeout")
+        self.reads = [[], [], [], []]
+        with self.assertRaisesRegex(p.ProviderError, "UNKNOWN"):
+            await self.unified(native)
+        self.assertEqual(self.adds(), [self.expected])
+        self.assertEqual(len([api for api, _ in self.calls if api.endswith("getUserDataByPage")]), 4)
+        self.assertEqual(json.loads(self.adds()[0]["data"])["reportFrom"], "Offline")
+        self.assertEqual(self.sleep_mock.await_count, 2)
+        self.calls.clear()
+        self.reads = [[], [self.expected]]
+        self.assertEqual((await self.unified(native))["status"], "verified")
+        self.assertEqual(self.adds(), [self.expected])
+
+    async def test_invalid_native_never_writes_and_time_is_not_replaced(self):
+        native = self.native()
+        native["data"].pop("bmi")
+        with self.assertRaises(p.ProviderError):
+            await self.unified(native)
+        self.assertEqual(self.calls, [])
+        native = self.native()
+        result = await p.report_scale_measurement(
+            self.hass, "auto", self.device, weight_kg=61.25,
+            measurement_time=1800000001, mode="fixed", profile_id="profile-2",
+            native_record=native)
+        self.assertEqual(result["status"], "conflict")
+        self.assertEqual(self.calls, [])
+
+    async def test_unified_weight_only_retains_fixed_and_nearest_semantics(self):
+        result = await self.unified(weight=61.25)
+        self.assertEqual(result["status"], "verified")
+        self.assertEqual(result["record_kind"], "weight_only")
+        self.assertEqual(json.loads(self.adds()[0]["data"])["reportFrom"], "UserEditor")
+        self.calls.clear()
+        self.histories["profile-2"] = [self.history(2, 61.2)]
+        self.reads = [[self.expected]]
+        result = await self.unified(mode="nearest", weight=61.25)
+        self.assertEqual(result["status"], "existing_verified")
+        self.assertEqual(result["matched_profile_id"], "profile-2")
+        self.assertEqual(self.adds(), [])
+
     async def test_readback_can_poll_but_add_is_once(self):
         self.reads = [[], [], [], [self.expected]]
         self.assertEqual((await self.report())["status"], "verified")

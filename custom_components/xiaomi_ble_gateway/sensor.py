@@ -94,7 +94,7 @@ class GatewaySensor(RestoreSensor):
             attrs.update(
                 interpretation="community interpretation; not verified against device screen",
                 measurement_source="local_ble_broadcast",
-                native_health_upload="official_usereditor_weight_only",
+                native_health_upload="gatt_first_native_or_weight_only_single_attempt",
                 target_profile_id=(self.runtime.weight_profile
                                    if self.device.mac == self.runtime.weight_device
                                    and self.runtime.weight_mode == WEIGHT_MODE_FIXED else None),
@@ -102,7 +102,7 @@ class GatewaySensor(RestoreSensor):
                 weight_match_threshold=self.runtime.weight_threshold,
                 weight_upload_enabled=self.runtime.weight_active(self.device.mac),
                 weight_upload_enabled_at=self.runtime.weight_enabled_at,
-                record_time_source="ha_live_reception_utc",
+                record_time_source="authenticated_device_time",
                 last_weight_attempt_device_time=state.last_weight_attempt_device_time,
                 target_profile_last_attempt_device_time=(state.weight_attempts.get(
                     self.runtime.weight_profile, {}).get("last_weight_attempt_device_time")
@@ -112,6 +112,7 @@ class GatewaySensor(RestoreSensor):
             )
             if self.entity_description.key == "cloud_status":
                 attrs["last_weight_match"] = self.runtime.last_weight_matches.get(self.device.mac)
+                attrs["last_scale_decision"] = self.runtime.last_scale_decisions.get(self.device.mac)
         return attrs
 
     async def async_added_to_hass(self):

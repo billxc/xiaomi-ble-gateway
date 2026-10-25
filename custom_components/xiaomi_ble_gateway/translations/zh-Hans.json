@@ -33,7 +33,7 @@
     "step": {
       "init": {
         "title": "网关选项",
-        "menu_options": {"devices": "设备与 CO₂ 上报", "environment_upload": "温度/湿度云上报", "weight_upload": "纯体重上报与归属模式", "recording": "全量原始蓝牙录制"}
+        "menu_options": {"devices": "设备与 CO₂ 上报", "environment_upload": "温度/湿度云上报", "weight_upload": "GATT 优先称重上报与归属模式", "recording": "全量原始蓝牙录制"}
       },
       "environment_upload": {
         "title": "温度/湿度云上报（默认关闭）",
@@ -51,13 +51,13 @@
         "data": {"devices": "设备（可多选）", "enable_co2_upload": "允许 CO₂ 云上报（不控制体重）"}
       },
       "weight_upload": {
-        "title": "纯体重上报（默认关闭）",
-        "description": "仅可选当前配置的秤；单台自动选中，多台必须选择。最近体重模式比较该秤全部云档案的可用参考，仅唯一最近且差值 ≤ 下方阈值（kg）时写入一个档案，不会把一条写给所有人；精确同距、无可用参考、全部超限均不写。广播及 tag 不能识别人，按体重匹配也不保证身份正确。最近模式直接保存；固定模式下一步明确选人，所有新称量归该人。启用或变更模式、阈值、目标均重设启用时间，不补传。仅官方 UserEditor 人工体重兼容归类，无体脂、BMI、GATT，不影响全量录制。",
-        "data": {"enable_weight_upload": "允许纯体重上报", "weight_upload_device": "目标秤", "weight_upload_mode": "归属模式", "weight_match_threshold": "最近匹配最大差值（kg，正数，默认 2.5）"}
+        "title": "GATT 优先称重上报（默认关闭）",
+        "description": "新鲜广播只触发 GATT，不立即上传。经 ESPHome 读取并等待 30 秒，优先原生数据；无本次候选才仅体重降级。两者共用一个持久消费边界，未知结果不重发、不再降级补第二笔；旧历史不补传，时间或身份冲突不写。最近模式仍仅唯一最近且差值 ≤ 阈值时选一档案；固定模式须明确选人，原生身份必须与所选档案一致。广播 tag 与体重匹配不证明身份。启用或更改目标/模式/阈值重设启用时间。GATT 原生记录保存在独立本地健康历史库，无自动保留期限；不改变原始广播录制开关。",
+        "data": {"enable_weight_upload": "允许 GATT 优先称重上报", "weight_upload_device": "目标秤", "weight_upload_mode": "归属模式", "weight_match_threshold": "最近匹配最大差值（kg，正数，默认 2.5）"}
       },
       "weight_profile": {
         "title": "明确选择米家用户归属",
-        "description": "档案由米家读取，不默认第一个。广播不能识别人，此秤所有新称量都会写入所选档案历史；请确认归属。仅人工体重兼容记录，无体脂。切档案会重设启用时间，防止补传旧称量。",
+        "description": "档案由米家读取，不默认第一个。原生 GATT 记录的账号、设备用户编号和类型必须与所选档案一致，否则不写；仅体重降级仍按此固定档案归属，请确认。切档案重设启用时间，但不清除设备全局消费边界，不补传旧称量。",
         "data": {"weight_upload_profile": "固定米家用户档案"}
       }
     },
@@ -95,6 +95,8 @@
         "state": {
           "weight_upload_disabled": "体重上报关闭",
           "waiting_weight": "等待新鲜称量",
+          "gatt_pending": "等待 GATT 称重数据",
+          "gatt_conflict": "GATT 候选冲突，未写入",
           "time_unverified": "称量时间未验证",
           "unknown": "结果未知，不重试",
           "verified": "写入并读回验证",

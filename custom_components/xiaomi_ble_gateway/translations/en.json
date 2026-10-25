@@ -33,7 +33,7 @@
     "step": {
       "init": {
         "title": "Gateway options",
-        "menu_options": {"devices": "Devices and CO₂ uploads", "environment_upload": "Temperature/humidity cloud uploads", "weight_upload": "Weight-only uploads and matching mode", "recording": "All raw Bluetooth advertisements"}
+        "menu_options": {"devices": "Devices and CO₂ uploads", "environment_upload": "Temperature/humidity cloud uploads", "weight_upload": "GATT-first scale uploads and matching mode", "recording": "All raw Bluetooth advertisements"}
       },
       "environment_upload": {
         "title": "Temperature/humidity cloud uploads (off by default)",
@@ -51,13 +51,13 @@
         "data": {"devices": "Devices", "enable_co2_upload": "Enable CO₂ cloud uploads (independent of weight)"}
       },
       "weight_upload": {
-        "title": "Weight-only uploads (off by default)",
-        "description": "Only configured scales are available; a single scale is selected automatically. Nearest mode compares usable references from ALL cloud profiles on this scale. Only a unique nearest reference within the threshold below (kg, inclusive) receives ONE record, never all profiles. Exact ties, no usable references and all references outside the threshold cause no write. Broadcasts and tags cannot identify people; weight matching is not identity verification. Nearest saves directly; fixed mode explicitly selects one person next and assigns all new weighings to them. Enabling or changing mode, threshold or target resets the enable time; no backfill. Uses official UserEditor manual-weight compatibility, without body fat, BMI or GATT; all-device recording is unchanged.",
-        "data": {"enable_weight_upload": "Enable weight-only uploads", "weight_upload_device": "Target scale", "weight_upload_mode": "Matching mode", "weight_match_threshold": "Maximum nearest difference (kg, positive, default 2.5)"}
+        "title": "GATT-first scale uploads (off by default)",
+        "description": "A fresh broadcast triggers GATT without an immediate upload. Read through ESPHome and listen for 30 seconds, preferring native data; choose weight-only only when no current candidate is available. Both choices share one persistent consumption gate. Unknown writes are never retried or followed by another fallback write; history is not backfilled. Time/identity conflicts cause no write. Nearest still selects one unique closest profile within the threshold; fixed mode explicitly selects a profile. Native identity must agree with the chosen profile. Tags and weight matching do not prove identity. Target/mode/threshold changes reset enable time, not the global consumed boundary. Native GATT data is saved to a separate local health-history database with no automatic TTL; raw recording is independently controlled.",
+        "data": {"enable_weight_upload": "Enable GATT-first scale uploads", "weight_upload_device": "Target scale", "weight_upload_mode": "Matching mode", "weight_match_threshold": "Maximum nearest difference (kg, positive, default 2.5)"}
       },
       "weight_profile": {
         "title": "Explicitly select a Xiaomi user profile",
-        "description": "Profiles are read from Xiaomi; the first profile is never selected by default. Broadcasts cannot identify people. Every new measurement from this scale goes into this fixed profile's history as a manual-weight compatibility record, without body fat. Changing profiles resets the enable time to prevent old measurements being backfilled.",
+        "description": "Profiles are read from Xiaomi; the first is never selected by default. Native account/device-user/type identity must agree with this profile or no write occurs. Weight-only fallback uses this fixed profile, so verify ownership. Changing profiles resets enable time, not the global consumed boundary; no history backfill.",
         "data": {"weight_upload_profile": "Fixed Xiaomi user profile"}
       }
     },
@@ -95,6 +95,8 @@
         "state": {
           "weight_upload_disabled": "Weight uploads disabled",
           "waiting_weight": "Waiting for a fresh weighing",
+          "gatt_pending": "Waiting for GATT weighing data",
+          "gatt_conflict": "Conflicting GATT candidate; no write",
           "time_unverified": "Measurement time unverified",
           "unknown": "Unknown result; no retry",
           "verified": "Written and verified by readback",

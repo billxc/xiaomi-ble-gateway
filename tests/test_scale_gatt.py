@@ -238,6 +238,15 @@ class ScaleGattTests(unittest.IsolatedAsyncioTestCase):
                                       "online_records", "saved_records", "duplicate_records", "complete", "repair_requests"})
         return result
 
+    async def test_upload_listen_window_does_not_end_at_first_quiet_gap(self):
+        device = FakeBleak([count_response(0)])
+        started = asyncio.get_running_loop().time()
+        result = await self.collect(device, listen_seconds=0.03)
+        self.assertGreaterEqual(asyncio.get_running_loop().time() - started, 0.03)
+        self.assertTrue(result["complete"])
+        self.assertEqual(len(device.actions), 1)
+        self.assertEqual(self.saved, [])
+
     async def test_full_login_history_duplicates_and_online_actual_csv_parser(self):
         device = FakeBleak([count_response(2), event(OFFLINE + "_" + OFFLINE),
                             event(CSV, offline=False), event("12," + CSV)])

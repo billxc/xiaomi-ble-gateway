@@ -32,6 +32,9 @@ async def async_get_config_entry_diagnostics(hass, entry):
         if device.model == SCALE_MODEL:
             item.update(
                 weight_upload_enabled=runtime.weight_active(mac),
+                scale_upload_policy="gatt_first_single_attempt",
+                gatt_listen_seconds=30,
+                last_scale_decision=runtime.last_scale_decisions.get(mac),
                 target_profile_id=(runtime.weight_profile if mac == runtime.weight_device
                                    and runtime.weight_mode == WEIGHT_MODE_FIXED else None),
                 weight_upload_mode=runtime.weight_mode,

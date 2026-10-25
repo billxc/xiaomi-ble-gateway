@@ -95,7 +95,8 @@ class DeviceState:
                           "requires_gatt", "skipped_overload", "skipped_stale",
                           "weight_upload_disabled", "waiting_weight", "time_unverified",
                           "verified", "existing_verified", "existing_conflict", "existing",
-                          "conflict", "no_match", "ambiguous", "no_reference"}:
+                          "conflict", "no_match", "ambiguous", "no_reference",
+                          "gatt_pending", "gatt_conflict"}:
             status = "unknown"
         weight_attempts = data.get("weight_attempts", {})
         if not isinstance(weight_attempts, dict):

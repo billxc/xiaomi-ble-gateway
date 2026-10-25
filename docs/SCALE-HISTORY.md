@@ -2,6 +2,8 @@
 
 `xiaomi.scales.ms110` / S400 Pro only. An **explicit HA action** establishes a
 short-lived GATT connection through an existing active ESPHome Bluetooth Proxy.
+Enabled [GATT-first uploads](GATT-FIRST-UPLOAD.md) also use this collector for
+fresh broadcast-triggered preparation, without enabling historical backfill.
 The ESP32 performs radio/GATT IO; the single HA gateway performs Standard Auth,
 SPEC decoding, durable saving and merging. No custom board firmware or separate
 Windows business program is needed.
@@ -84,9 +86,12 @@ are calculated. Device identity is bound to MAC **and DID**.
 - Nearby times/weights, broadcast tag, impedance similarity or the nearest-user
   cloud-upload threshold are never sufficient to merge records.
 
-History data never enters the cloud upload queue, changes replay high-water
-marks, becomes a nearest-weight reference, or replaces the broadcast entity's
-current weight. Existing fresh-broadcast upload permissions remain unchanged.
+An explicit manual pull and old historical rows never enter the cloud upload
+queue, change replay high-water marks, become nearest-weight references, or
+replace the broadcast entity's current weight. When scale uploads are enabled,
+a separate GATT-first preparation may select a fresh current native record;
+this is not triggered by saving/restoring/merging history. See the separate
+[GATT-first upload policy](GATT-FIRST-UPLOAD.md).
 
 ## Storage and privacy
 

@@ -1,8 +1,9 @@
 """Explicit local history pulls through HA's managed ESPHome GATT connection.
 
 No polling, cloud writes, registration, clock sync or offline-record confirmation.
-Only an explicit HA action starts this branch. Native payloads never enter the
-broadcast upload queue or alter its persistent consumption gates.
+Manual actions remain local-only. GATT-first preparation can also collect
+persisted observations for one pending fresh weighing; only its caller applies
+freshness/profile policy and the shared cloud consumption gate.
 """
 from __future__ import annotations
 
@@ -89,7 +90,24 @@ class ScaleHistoryCoordinator:
             finally:
                 self._queue.task_done()
 
-    async def async_pull(self, mac):
+    async def async_collect_for_upload(self, mac):
+        """Return persisted native observations to ONE pending fresh weighing.
+
+        Never expose these payloads through the manual action/diagnostics. A
+        simultaneous manual pull is a conflict, not permission for an immediate
+        weight-only fallback while a complete result may still be arriving.
+        """
+        if self._pull_task is not None:
+            return {"status": "busy", "complete": False}, []
+        records = []
+
+        async def observe(batch):
+            records.extend(batch)
+
+        result = await self.async_pull(mac, on_records=observe, listen_seconds=30)
+        return result, records
+
+    async def async_pull(self, mac, *, on_records=None, listen_seconds=0):
         if self._closing:
             raise ServiceValidationError("History collector is stopping")
         if self._pull_task is not None:
@@ -135,13 +153,16 @@ class ScaleHistoryCoordinator:
                     f"{source}@{proxy_source}", int(time.time()))
                 for key in merged:
                     merged[key] += summary[key]
+                if on_records is not None:
+                    await on_records(records)
 
             # One connection attempt; no rebind/configuration fallback.
             async with asyncio.timeout(100):
                 client = await establish_connection(
                     BleakClient, selected.ble_device, device.name,
                     max_attempts=1, timeout=20)
-                result = await collect_history(client, token, persist, timeout=75)
+                options = {"listen_seconds": listen_seconds} if listen_seconds else {}
+                result = await collect_history(client, token, persist, timeout=75, **options)
             del token
             await self._queue.join()
             totals = await self.hass.async_add_executor_job(self.store.totals, mac)

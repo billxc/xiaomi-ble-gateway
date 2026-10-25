@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import logging
 import math
 import time
@@ -21,6 +21,7 @@ from .const import (CO2_MODEL, DOMAIN, FE95_UUID, MODEL_PIDS, SCALE_MODEL,
                     positive_weight_threshold, weight_config)
 from .protocol import decode_advertisement
 from .state import DeviceState, Observation, weight_time_is_fresh
+from .scale_native import select_native_record
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,6 +50,10 @@ class UploadJob:
     threshold: float = DEFAULT_WEIGHT_THRESHOLD
     environment_readings: dict = field(default_factory=dict)
     environment_config: tuple = ()
+    scale_prepared: bool = False
+    scale_decision: str = "weight_only"
+    scale_reason: str | None = None
+    native_record: dict | None = None
 
     @property
     def weight_attempt_key(self):
@@ -71,6 +76,11 @@ class GatewayRuntime:
         self.states = {mac: DeviceState() for mac in self.devices}
         self.store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
         self._queue = asyncio.Queue(maxsize=128)
+        self._scale_queue = asyncio.Queue(maxsize=16)
+        self._scale_pending = set()
+        self._scale_worker = None
+        self._save_lock = asyncio.Lock()
+        self.last_scale_decisions = {}
         self._unsubs = []
         self._worker = None
         self._reference_task = None
@@ -142,6 +152,10 @@ class GatewayRuntime:
         self._started_at = asyncio.get_running_loop().time()
         self._worker = self.hass.async_create_background_task(
             self._async_process(), f"{DOMAIN} serial upload {self.entry.entry_id}"
+        )
+        self._scale_worker = self.hass.async_create_background_task(
+            self._async_prepare_scale_uploads(),
+            f"{DOMAIN} GATT-first weighing {self.entry.entry_id}",
         )
         for mac in self.devices:
             self._unsubs.append(bluetooth.async_register_callback(
@@ -250,12 +264,91 @@ class GatewayRuntime:
                         self.weight_profile, self.weight_enabled_at, device_time,
                         self.weight_mode, self.weight_threshold,
                         dict(environment_readings), self.environment_config)
+        if kind == "weight":
+            key = (mac, device_time)
+            if key not in self._scale_pending:
+                try:
+                    self._scale_queue.put_nowait(job)
+                    self._scale_pending.add(key)
+                    state.cloud_status = "gatt_pending"
+                except asyncio.QueueFull:
+                    state.cloud_status = "skipped_overload"
+            # Persist broadcast counters promptly, but never upload this
+            # provisional weight before the GATT decision is final.
+            job = replace(job, kind=None)
         try:
             self._queue.put_nowait(job)
         except asyncio.QueueFull:
             if kind is not None:
                 state.cloud_status = "skipped_overload"
         self._notify(mac)
+
+    async def _async_prepare_scale_uploads(self):
+        """Collect GATT independently, then freeze ONE choice for the writer."""
+        while not self._closing:
+            job = await self._scale_queue.get()
+            state = self.states[job.mac]
+            enqueued = False
+            try:
+                if (weight_config(self.entry.data) != self.weight_config
+                        or not state.can_attempt_weight(job.weight_attempt_key, job.device_time)):
+                    continue
+                if (asyncio.get_running_loop().time() - job.queued_at > 60
+                        or int(time.time()) - job.received_at > 120):
+                    state.cloud_status = "skipped_stale"
+                    continue
+                # No cloud attempt yet. Consumption remains in the original
+                # serial writer; RAM pending state spans preparation AND queueing.
+                state.cloud_status = "gatt_pending"
+                self._notify(job.mac)
+                if self._history is None:
+                    from .history_runtime import ScaleHistoryCoordinator
+                    self._history = ScaleHistoryCoordinator(self)
+                try:
+                    result, records = await self._history.async_collect_for_upload(job.mac)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as err:
+                    result, records = {"status": "failed", "complete": False,
+                                       "error": type(err).__name__}, []
+                if result.get("status") == "busy":
+                    decision = {"status": "conflict", "reason": "gatt_busy"}
+                else:
+                    decision = select_native_record(
+                        records, device_time=job.device_time,
+                        received_at=job.received_at, enabled_at=job.enabled_at,
+                        gatt_result=result)
+                self.last_scale_decisions[job.mac] = {
+                    "device_time": job.device_time,
+                    "choice": decision["status"], "reason": decision.get("reason"),
+                    "gatt_status": result.get("status"),
+                    "gatt_complete": result.get("complete", False),
+                    "observed_native_records": len(records),
+                }
+                prepared = replace(job, queued_at=asyncio.get_running_loop().time(),
+                                   scale_prepared=True, scale_decision=decision["status"],
+                                   scale_reason=decision.get("reason"),
+                                   native_record=decision.get("record"))
+                try:
+                    self._queue.put_nowait(prepared)
+                    enqueued = True
+                except asyncio.QueueFull:
+                    state.cloud_status = "skipped_overload"
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:
+                # An internal preparation error never authorizes a second
+                # branch while this preparation is running.
+                state.cloud_status = "gatt_conflict"
+                self.last_scale_decisions[job.mac] = {
+                    "device_time": job.device_time, "choice": "conflict",
+                    "reason": type(err).__name__,
+                }
+            finally:
+                if not enqueued:
+                    self._scale_pending.discard((job.mac, job.device_time))
+                self._scale_queue.task_done()
+                self._notify(job.mac)
 
     def _environment_result(self, job, status, error=None):
         """RAM-only batch/field metadata, not a replay gate or value cache."""
@@ -275,9 +368,12 @@ class GatewayRuntime:
                 fields[key][f"last_{status}_at"] = now
 
     async def _async_save(self):
-        await self.store.async_save({"devices": {
-            mac: state.snapshot() for mac, state in self.states.items()
-        }})
+        # GATT reservation and environment writes share one Store. Snapshot
+        # INSIDE the lock so an older save cannot erase a newer consumption gate.
+        async with self._save_lock:
+            await self.store.async_save({"devices": {
+                mac: state.snapshot() for mac, state in self.states.items()
+            }})
 
     async def _async_process(self):
         while not self._closing:
@@ -289,16 +385,25 @@ class GatewayRuntime:
                     kind = None
                     state.cloud_status = "skipped_stale"
                 if kind == "weight":
-                    # Recheck in serial worker: multiple counters may have queued
-                    # the same physical measurement before the first was marked.
-                    if (weight_config(self.entry.data) != self.weight_config
-                            or not weight_time_is_fresh(job.device_time, job.enabled_at, job.received_at)
+                    # Only a finalized GATT decision reaches the shared
+                    # consumption boundary. Native and fallback are mutually
+                    # exclusive choices for this same device/time gate.
+                    if (not job.scale_prepared
+                            or weight_config(self.entry.data) != self.weight_config
                             or not state.can_attempt_weight(job.weight_attempt_key, job.device_time)):
                         kind = None
+                    elif (not weight_time_is_fresh(job.device_time, job.enabled_at, job.received_at)
+                          or not weight_time_is_fresh(job.device_time, job.enabled_at, int(time.time()))
+                          or int(time.time()) - job.received_at > 120):
+                        state.cloud_status = "skipped_stale"
+                        kind = None
                     else:
-                        # __nearest__ consumes the measurement locally before the
-                        # provider chooses ONE real profile; it is never sent.
-                        state.mark_weight_attempt(job.weight_attempt_key, job.device_time, job.received_at)
+                        state.mark_weight_attempt(job.weight_attempt_key, job.device_time, job.device_time)
+                        if job.scale_decision == "conflict":
+                            state.cloud_status = "gatt_conflict"
+                            kind = None
+                        elif job.scale_decision not in {"native", "weight_only"}:
+                            kind = None
                 elif kind == "environment":
                     if environment_config(self.entry.data) != job.environment_config:
                         kind = None
@@ -318,8 +423,13 @@ class GatewayRuntime:
                     continue
                 # Entry updates may have arrived while awaiting the Store save.
                 # Never start an obsolete target's write before reload cancels us.
-                if kind == "weight" and weight_config(self.entry.data) != self.weight_config:
-                    kind = None
+                if kind == "weight":
+                    if weight_config(self.entry.data) != self.weight_config:
+                        kind = None
+                    elif (not weight_time_is_fresh(job.device_time, job.enabled_at, int(time.time()))
+                          or int(time.time()) - job.received_at > 120):
+                        state.cloud_status = "skipped_stale"
+                        kind = None
                 if (kind == "environment"
                         and environment_config(self.entry.data) != job.environment_config):
                     self._environment_result(job, "skipped_config_changed")
@@ -333,17 +443,14 @@ class GatewayRuntime:
                         # bounded read-only confirmations (25s/request).
                         async with asyncio.timeout(180 if kind == "weight" else 35):
                             if kind == "weight":
-                                if job.mode == WEIGHT_MODE_NEAREST:
-                                    result = await providers.report_scale_weight_nearest(
-                                        self.hass, self.source_account_id, self.devices[job.mac],
-                                        float(job.value), job.received_at,
-                                        max_difference=job.threshold,
-                                    )
-                                else:
-                                    result = await providers.report_scale_weight(
-                                        self.hass, self.source_account_id, self.devices[job.mac],
-                                        job.profile_id, float(job.value), job.received_at,
-                                    )
+                                result = await providers.report_scale_measurement(
+                                    self.hass, self.source_account_id, self.devices[job.mac],
+                                    weight_kg=float(job.value),
+                                    measurement_time=job.device_time,
+                                    mode=job.mode, profile_id=job.profile_id,
+                                    max_difference=job.threshold,
+                                    native_record=job.native_record,
+                                )
                                 status = result.get("status")
                                 state.cloud_status = status if status in {
                                     "verified", "existing_verified", "existing_conflict", "existing",
@@ -356,6 +463,7 @@ class GatewayRuntime:
                                     "selected_name": result.get("matched_profile_name"),
                                     "difference": result.get("difference"),
                                     "references": _reference_summary(references),
+                                    "record_kind": result.get("record_kind"),
                                 }
                             else:
                                 await providers.report_environment(
@@ -389,6 +497,8 @@ class GatewayRuntime:
                     except Exception as err:
                         _LOGGER.error("Cloud status save failed (%s)", type(err).__name__)
             finally:
+                if job.kind == "weight" and job.scale_prepared:
+                    self._scale_pending.discard((job.mac, job.device_time))
                 self._queue.task_done()
                 self._notify(job.mac)
 
@@ -403,6 +513,11 @@ class GatewayRuntime:
             self._reference_task.cancel()
         if self._worker is not None:
             self._worker.cancel()
+        if self._scale_worker is not None:
+            self._scale_worker.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._scale_worker
+            self._scale_worker = None
         if self._history is not None:
             await self._history.async_stop()
         if self._reference_task is not None:

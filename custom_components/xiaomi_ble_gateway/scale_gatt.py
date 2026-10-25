@@ -117,8 +117,9 @@ class _Channel:
 
 
 class _Collector:
-    def __init__(self, client, on_records):
+    def __init__(self, client, on_records, listen_seconds=0):
         self.client, self.on_records = client, on_records
+        self.listen_seconds = listen_seconds
         self.queue = asyncio.Queue(maxsize=QUEUE_SIZE)
         self.overflow = False
         self.notification_counts = {}
@@ -368,6 +369,7 @@ class _Collector:
         self.summary["phase"] = "history_request"
         await self.send(SPEC_RX, 0, self.session.encrypt(plaintext))
         self.summary["phase"] = "history_receive"
+        listen_until = asyncio.get_running_loop().time() + self.listen_seconds
         while True:
             while self.messages:
                 uuid, kind, packet = self.messages.popleft()
@@ -380,6 +382,8 @@ class _Collector:
                 _require(not self.overflow, "queue_overflow")
                 if busy:
                     raise
+                if asyncio.get_running_loop().time() < listen_until:
+                    continue
                 break
         expected = self.summary["expected_records"]
         complete = (expected is not None and self.summary["received_records"] == expected
@@ -412,7 +416,7 @@ def _arguments(frame, offset, count):
 
 async def collect_history(client, token: bytes,
                           on_records: Callable[..., Awaitable[object]],
-                          timeout: float = 75) -> dict:
+                          timeout: float = 75, listen_seconds: float = 0) -> dict:
     """Collect on an already connected Bleak-compatible client; never disconnect.
 
     await on_records(list[parse_native_csv result], source='gatt_offline' or
@@ -437,7 +441,10 @@ async def collect_history(client, token: bytes,
         raise ValueError("A 12-byte BLE token is required")
     if isinstance(timeout, bool) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("A positive finite timeout is required")
-    collector = _Collector(client, on_records)
+    if (isinstance(listen_seconds, bool) or not math.isfinite(listen_seconds)
+            or not 0 <= listen_seconds < timeout):
+        raise ValueError("Listen window must fit inside the total timeout")
+    collector = _Collector(client, on_records, listen_seconds)
     try:
         async with asyncio.timeout(timeout):
             await collector.run(token)

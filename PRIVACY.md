@@ -22,8 +22,12 @@ native body-composition results. **There is no automatic TTL** for this health
 history; raw-recorder retention does not apply. Reload/removal does not delete
 it. After a pull, local authenticated broadcast observations are also recorded
 until reload for candidate association. Neither historical records nor merge
-updates authorize cloud writes or scale-history clearing. See
-[Scale history](docs/SCALE-HISTORY.md).
+updates authorize cloud writes or scale-history clearing. Enabling scale uploads
+also enables GATT-first native collection for fresh broadcast-triggered weighings,
+using this same private health-history store with no automatic TTL. Only a
+separately validated current candidate can be uploaded through the single
+consumption gate; saving history alone is not authorization. See
+[Scale history](docs/SCALE-HISTORY.md) and [upload policy](docs/GATT-FIRST-UPLOAD.md).
 
 ## HA entities and diagnostics
 
