@@ -1,0 +1,15 @@
+# Python >=3.12; no Bleak, account credentials or bindkeys.
+# Receiver uses vendored wire definitions, not the compiled client SDK.
+protobuf==7.36.2
+cryptography==50.0.2
+noiseprotocol==0.3.1
+
+# PyWinRT 4 uses epoch-versioned projection packages and supports Python 3.14.
+winrt-runtime==4.0.0; sys_platform == "win32"
+winrt-Windows.Foundation==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Foundation.Collections==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Devices.Bluetooth==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Devices.Bluetooth.Advertisement==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Devices.Enumeration==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Devices.Radios==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Storage.Streams==4!10.0.28000.2705; sys_platform == "win32"

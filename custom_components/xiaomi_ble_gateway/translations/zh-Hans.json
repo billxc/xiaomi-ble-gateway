@@ -1,0 +1,112 @@
+{
+  "title": "Xiaomi BLE Cloud Gateway",
+  "config": {
+    "step": {
+      "user": {
+        "title": "复用已加载的米家账号",
+        "description": "不新增云登录，不收集密码或 bindkey。仅 Home 元数据账号不足以解密，需要同 UID、同地区的已加载 Miot 账号。",
+        "data": {"account_id": "已有账号"}
+      },
+      "devices": {
+        "title": "选择蓝牙设备",
+        "description": "只列出该账号中 MAC/DID 映射可靠的受支持设备。此页上传开关仅对 CO₂ 生效；体重上报默认关闭，须在选项中另选最近体重匹配或固定米家档案。CO₂ 首个未知计数器样本只建立基线，不上传。原始录制独立覆盖所有 HA 可见蓝牙广播，不受设备选择限制，默认开启并保留 3 天。",
+        "data": {"devices": "设备（可多选）", "enable_co2_upload": "允许 CO₂ 云上报（不控制体重）", "record_raw": "录制全部原始蓝牙广播", "retention_days": "原始广播保留天数（正整数）"}
+      }
+    },
+    "error": {
+      "source_unavailable": "所选账号未加载，请先检查来源集成。",
+      "metadata_only": "此 Home 账号仅提供元数据，不能自动获取 bindkey 或上传。请加载同 UID、同地区的 Xiaomi Miot 账号。",
+      "provider_error": "来源账号读取失败，请检查已加载的 Miot 会话。",
+      "select_devices": "请至少选择一个设备。",
+      "devices_unavailable": "所选设备已不在该账号的可靠映射中，请重新选择。"
+    },
+    "abort": {
+      "already_configured": "该账号已配置，请使用选项修改设备。",
+      "no_accounts": "没有可复用的已加载 Xiaomi Miot/Home 账号。",
+      "source_unavailable": "所选来源账号已不可用。",
+      "metadata_only": "只有 Home 元数据，无法自动获取 bindkey 或上传；需要同 UID、同地区的已加载 Miot 账号。",
+      "provider_error": "无法读取来源账号设备，请先检查来源集成。",
+      "no_devices": "此账号没有 MAC/DID 映射可靠的受支持 CO₂ 传感器或秤。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "网关选项",
+        "menu_options": {"devices": "设备与 CO₂ 上报", "environment_upload": "温度/湿度云上报", "weight_upload": "纯体重上报与归属模式", "recording": "全量原始蓝牙录制"}
+      },
+      "environment_upload": {
+        "title": "温度/湿度云上报（默认关闭）",
+        "description": "保存后重载。仅上传已选 new3pr 设备在启用时间之后、新鲜实时回调中本帧读出的温度/湿度（property7.1001/7.1002）；CO₂（property8.1029）仍由原开关独立控制。同帧授权字段一次批量上报，不等齐字段、不跨帧补齐，不含电量、历史、HA 缓存或恢复值。只验证 HA 接收新鲜度，不保证设备测量时间。首帧仅建立基线；关闭不清除计数器、不补传，无需选择用户档案。批次仅全部逐项确认才算成功，部分确认或未知不重试。",
+        "data": {"enable_temperature_humidity_upload": "允许温度/湿度云上报"}
+      },
+      "recording": {
+        "title": "全量原始蓝牙录制",
+        "description": "独立记录所有 HA 可见广播，包括未知 MAC/UUID 和解密失败的包；不受所选设备限制，不上传未知邻居。无需账号可用，保存立即生效且不重载设备。默认保留 3 天，可改任意正整数；多账号共用一次录制，取所有启用录制的未禁用账号中的最大天数。关闭只停捕获，不立即删除已有数据库。",
+        "data": {"record_raw": "录制全部原始蓝牙广播", "retention_days": "原始广播保留天数（正整数）"}
+      },
+      "devices": {
+        "title": "设备与 CO₂ 上报选项",
+        "description": "保存后重载集成。此开关仅对 CO₂ 生效；体重上报及归属模式须在独立选项中设置，默认关闭。关闭上报仍会推进持久计数器，不补发旧样本。",
+        "data": {"devices": "设备（可多选）", "enable_co2_upload": "允许 CO₂ 云上报（不控制体重）"}
+      },
+      "weight_upload": {
+        "title": "纯体重上报（默认关闭）",
+        "description": "仅可选当前配置的秤；单台自动选中，多台必须选择。最近体重模式比较该秤全部云档案的可用参考，仅唯一最近且差值 ≤ 下方阈值（kg）时写入一个档案，不会把一条写给所有人；精确同距、无可用参考、全部超限均不写。广播及 tag 不能识别人，按体重匹配也不保证身份正确。最近模式直接保存；固定模式下一步明确选人，所有新称量归该人。启用或变更模式、阈值、目标均重设启用时间，不补传。仅官方 UserEditor 人工体重兼容归类，无体脂、BMI、GATT，不影响全量录制。",
+        "data": {"enable_weight_upload": "允许纯体重上报", "weight_upload_device": "目标秤", "weight_upload_mode": "归属模式", "weight_match_threshold": "最近匹配最大差值（kg，正数，默认 2.5）"}
+      },
+      "weight_profile": {
+        "title": "明确选择米家用户归属",
+        "description": "档案由米家读取，不默认第一个。广播不能识别人，此秤所有新称量都会写入所选档案历史；请确认归属。仅人工体重兼容记录，无体脂。切档案会重设启用时间，防止补传旧称量。",
+        "data": {"weight_upload_profile": "固定米家用户档案"}
+      }
+    },
+    "error": {
+      "profile_unavailable": "所选档案已不可用，请重新选择。",
+      "invalid_weight_threshold": "匹配阈值必须是有限正数（kg）。",
+      "select_devices": "请至少选择一个设备。",
+      "devices_unavailable": "设备映射已变化，请重新选择。"
+    },
+    "abort": {
+      "source_unavailable": "来源账号未加载。",
+      "metadata_only": "只有 Home 元数据，无法取得 bindkey 或上传；需要同 UID、同地区的 Miot 账号。",
+      "provider_error": "无法读取来源账号设备。",
+      "no_devices": "此账号没有映射可靠的受支持设备。",
+      "no_scales": "当前已配置设备中没有可用的秤，请先在设备选项中添加。",
+      "no_scale_profiles": "米家未返回可选档案，不能启用或默认归属。"
+    }
+  },
+  "exceptions": {
+    "source_unavailable": {"message": "来源账号尚未加载，等待来源集成就绪。"},
+    "metadata_only": {"message": "Home 仅提供元数据，无法取得 bindkey 或上传。需要同 UID、同地区的已加载 Miot 账号。"},
+    "devices_unavailable": {"message": "设备映射不可用，请检查来源集成并在选项中重新选择。"},
+    "bindkey_unavailable": {"message": "无法从已有来源会话取得设备或 bindkey，请检查 Miot 来源集成；本集成不会自动新增登录。"},
+    "state_unavailable": {"message": "持久去重状态无法读取，已停止所选设备解析与上报以防重放（不影响独立原始录制）；请检查存储，勿盲目删除计数器。"}
+  },
+  "entity": {
+    "sensor": {
+      "co2": {"name": "二氧化碳"},
+      "temperature": {"name": "温度"},
+      "humidity": {"name": "湿度"},
+      "battery": {"name": "电量"},
+      "broadcast_weight": {"name": "广播体重"},
+      "cloud_status": {
+        "name": "云上报状态",
+        "state": {
+          "weight_upload_disabled": "体重上报关闭",
+          "waiting_weight": "等待新鲜称量",
+          "time_unverified": "称量时间未验证",
+          "unknown": "结果未知，不重试",
+          "verified": "写入并读回验证",
+          "existing_verified": "已有一致记录，未重复写入",
+          "existing_conflict": "已有冲突记录，未写入",
+          "conflict": "已有冲突记录，未写入",
+          "existing": "已有记录，未写入",
+          "no_match": "所有参考均超阈值，未写入",
+          "ambiguous": "最近参考精确同距，未写入",
+          "no_reference": "无可用参考，未写入"
+        }
+      }
+    }
+  }
+}

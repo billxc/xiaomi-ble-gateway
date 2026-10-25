@@ -1,0 +1,5 @@
+# Offline unittest suite; Home Assistant is replaced by existing test stubs.
+cryptography==50.0.2
+# Also used by the offline Windows receiver protocol tests.
+aioesphomeapi==46.22.0
+noiseprotocol==0.3.1

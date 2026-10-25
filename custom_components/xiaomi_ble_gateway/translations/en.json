@@ -1,0 +1,112 @@
+{
+  "title": "Xiaomi BLE Cloud Gateway",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Reuse a loaded Xiaomi account",
+        "description": "No new login or key entry. Home provides metadata only; bindkeys and uploads require a loaded Miot account with the same UID and region.",
+        "data": {"account_id": "Existing account"}
+      },
+      "devices": {
+        "title": "Select Bluetooth devices",
+        "description": "Only supported devices with reliable MAC/DID mappings are listed. This upload switch applies to CO₂ only. Weight uploads default to off and require nearest-weight or fixed-profile configuration in options. The first unknown CO₂ counter establishes a baseline without uploading. Independent raw recording covers all HA-visible Bluetooth advertisements, regardless of device selection; enabled by default with 3-day retention.",
+        "data": {"devices": "Devices", "enable_co2_upload": "Enable CO₂ cloud uploads (independent of weight)", "record_raw": "Record all raw Bluetooth advertisements", "retention_days": "Raw advertisement retention days (positive integer)"}
+      }
+    },
+    "error": {
+      "source_unavailable": "The selected source account is not loaded.",
+      "metadata_only": "Home metadata cannot supply bindkeys or uploads. Load Miot with the same UID and region.",
+      "provider_error": "Cannot read the source account. Check the existing Miot session.",
+      "select_devices": "Select at least one device.",
+      "devices_unavailable": "Selected device mappings have changed. Select devices again."
+    },
+    "abort": {
+      "already_configured": "This account is already configured. Use options to change devices.",
+      "no_accounts": "No loaded Xiaomi Miot/Home accounts are available.",
+      "source_unavailable": "The selected source account is unavailable.",
+      "metadata_only": "Home metadata cannot supply bindkeys or uploads. Load Miot with the same UID and region.",
+      "provider_error": "Cannot read devices from the source account.",
+      "no_devices": "No supported devices with reliable MAC/DID mappings were found in this account."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Gateway options",
+        "menu_options": {"devices": "Devices and CO₂ uploads", "environment_upload": "Temperature/humidity cloud uploads", "weight_upload": "Weight-only uploads and matching mode", "recording": "All raw Bluetooth advertisements"}
+      },
+      "environment_upload": {
+        "title": "Temperature/humidity cloud uploads (off by default)",
+        "description": "Saving reloads the integration. Upload only temperature/humidity (property7.1001/7.1002) read from the current fresh live callback of selected new3pr devices after enabling. CO₂ (property8.1029) remains independently controlled. Authorized fields in one frame form one batch: no waiting or merging across frames. No battery, history, HA cache or restored values. Only HA reception freshness is verified, not device measurement time. The first frame only establishes a baseline. Disabling never clears counters or backfills data; no user profile is required. Success requires every property to acknowledge; partial or unknown results are not retried.",
+        "data": {"enable_temperature_humidity_upload": "Enable temperature/humidity cloud uploads"}
+      },
+      "recording": {
+        "title": "All raw Bluetooth advertisements",
+        "description": "Record all HA-visible advertisements, including unknown MACs/UUIDs and decryption failures, independently of selected devices. Unknown neighbors are never uploaded. This form works without a working account and applies immediately without reloading devices. Retention defaults to 3 days and accepts any positive integer. All accounts share one recorder using the maximum retention of non-disabled entries with recording enabled. Turning recording off stops capture without immediately deleting the existing database.",
+        "data": {"record_raw": "Record all raw Bluetooth advertisements", "retention_days": "Raw advertisement retention days (positive integer)"}
+      },
+      "devices": {
+        "title": "Devices and CO₂ uploads",
+        "description": "Saving reloads the integration. This switch applies only to CO₂; weight uploads and their matching mode are configured separately and default to off. Counters advance even with uploads disabled; old samples are never backfilled.",
+        "data": {"devices": "Devices", "enable_co2_upload": "Enable CO₂ cloud uploads (independent of weight)"}
+      },
+      "weight_upload": {
+        "title": "Weight-only uploads (off by default)",
+        "description": "Only configured scales are available; a single scale is selected automatically. Nearest mode compares usable references from ALL cloud profiles on this scale. Only a unique nearest reference within the threshold below (kg, inclusive) receives ONE record, never all profiles. Exact ties, no usable references and all references outside the threshold cause no write. Broadcasts and tags cannot identify people; weight matching is not identity verification. Nearest saves directly; fixed mode explicitly selects one person next and assigns all new weighings to them. Enabling or changing mode, threshold or target resets the enable time; no backfill. Uses official UserEditor manual-weight compatibility, without body fat, BMI or GATT; all-device recording is unchanged.",
+        "data": {"enable_weight_upload": "Enable weight-only uploads", "weight_upload_device": "Target scale", "weight_upload_mode": "Matching mode", "weight_match_threshold": "Maximum nearest difference (kg, positive, default 2.5)"}
+      },
+      "weight_profile": {
+        "title": "Explicitly select a Xiaomi user profile",
+        "description": "Profiles are read from Xiaomi; the first profile is never selected by default. Broadcasts cannot identify people. Every new measurement from this scale goes into this fixed profile's history as a manual-weight compatibility record, without body fat. Changing profiles resets the enable time to prevent old measurements being backfilled.",
+        "data": {"weight_upload_profile": "Fixed Xiaomi user profile"}
+      }
+    },
+    "error": {
+      "profile_unavailable": "The selected profile is no longer available. Select again.",
+      "invalid_weight_threshold": "The matching threshold must be a finite positive number (kg).",
+      "select_devices": "Select at least one device.",
+      "devices_unavailable": "Device mappings have changed. Select devices again."
+    },
+    "abort": {
+      "source_unavailable": "The source account is not loaded.",
+      "metadata_only": "Home metadata cannot supply bindkeys or uploads. Load Miot with the same UID and region.",
+      "provider_error": "Cannot read devices from the source account.",
+      "no_devices": "No supported devices with reliable mappings were found.",
+      "no_scales": "No configured scale is available. Add one in device options first.",
+      "no_scale_profiles": "Xiaomi returned no selectable profiles; uploads cannot be enabled."
+    }
+  },
+  "exceptions": {
+    "source_unavailable": {"message": "Waiting for the existing source account to load."},
+    "metadata_only": {"message": "Home metadata cannot supply bindkeys or uploads. Load Miot with the same UID and region."},
+    "devices_unavailable": {"message": "Device mappings are unavailable. Check the source integration and select devices again in options."},
+    "bindkey_unavailable": {"message": "Cannot obtain devices or bindkeys from the existing session. Check Miot; this integration does not initiate a new login."},
+    "state_unavailable": {"message": "Replay state could not be read. Selected-device decoding and uploads are stopped to prevent replay; independent raw recording is unaffected. Check storage; do not blindly delete counters."}
+  },
+  "entity": {
+    "sensor": {
+      "co2": {"name": "Carbon dioxide"},
+      "temperature": {"name": "Temperature"},
+      "humidity": {"name": "Humidity"},
+      "battery": {"name": "Battery"},
+      "broadcast_weight": {"name": "Broadcast weight"},
+      "cloud_status": {
+        "name": "Cloud upload status",
+        "state": {
+          "weight_upload_disabled": "Weight uploads disabled",
+          "waiting_weight": "Waiting for a fresh weighing",
+          "time_unverified": "Measurement time unverified",
+          "unknown": "Unknown result; no retry",
+          "verified": "Written and verified by readback",
+          "existing_verified": "Existing matching record; no duplicate write",
+          "existing_conflict": "Existing conflicting record; no write",
+          "conflict": "Existing conflicting record; no write",
+          "existing": "Existing record; no write",
+          "no_match": "All references outside threshold; no write",
+          "ambiguous": "Exact tie for nearest reference; no write",
+          "no_reference": "No usable reference; no write"
+        }
+      }
+    }
+  }
+}

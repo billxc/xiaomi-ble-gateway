@@ -1,0 +1,17 @@
+{
+  "upstream": "aioesphomeapi",
+  "version": "46.22.0",
+  "upstream_url": "https://github.com/esphome/aioesphomeapi",
+  "tag": "v46.22.0",
+  "upstream_tag_object_sha": "6cddfb31f052939574b7b16f0acba893c429e2c0",
+  "distribution_url": "https://pypi.org/project/aioesphomeapi/46.22.0/",
+  "upstream_paths": {
+    "api_pb2.py": "aioesphomeapi/api_pb2.py",
+    "api_options_pb2.py": "aioesphomeapi/api_options_pb2.py",
+    "LICENSE": "LICENSE"
+  },
+  "files_sha256": {
+    "api_pb2.py": "367eccf77d1c4f9832f544b6da13bb3e7ab907100664aab7c8c6022faf1ff466",
+    "api_options_pb2.py": "823ef7bd77e3ee36dc9416c7bba9376d20134e4cf0d9d45369c159ab3925ce55"
+  }
+}
