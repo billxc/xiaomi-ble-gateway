@@ -9,6 +9,17 @@ The schema is upstream material, not original schema authored by this project. T
 Upstream: https://github.com/esphome/aioesphomeapi
 Distribution: https://pypi.org/project/aioesphomeapi/46.22.0/
 
+## Standard Auth reference
+
+The Python Standard Auth/session layout is adapted from the MIT-licensed
+`dentra/esphome-components` implementation at commit
+`38488b299cc9ecac0cc9f7cda0898c7bcc373f77`. Its notice is retained in
+`third_party/dentra-standard-auth/LICENSE`. The original confirmation-check
+fail-open and sensitive debug logging are not retained. No AGPL `miauth` code is
+included.
+
+Source: https://github.com/dentra/esphome-components/tree/38488b299cc9ecac0cc9f7cda0898c7bcc373f77/components/miot_client
+
 ## Protocol and service mappings
 
 MiBeacon layouts and model-specific interpretation use publicly documented interfaces and community protocol research. Environmental property mappings are available through the Xiaomi MIoT specification service. Model names, UUIDs, field numbers and wire layouts describe interoperability, not endorsement.

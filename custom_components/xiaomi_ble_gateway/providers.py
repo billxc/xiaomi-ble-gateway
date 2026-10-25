@@ -309,6 +309,26 @@ async def get_bindkey(hass, account_id, device: DeviceRef) -> bytes:
     return bytes.fromhex(key)
 
 
+async def get_scale_ble_token(hass, account_id, device: DeviceRef) -> bytes:
+    """Read ONLY the verified scale's existing Standard Auth token into RAM."""
+    if device.model != SCALE_MODEL:
+        raise ProviderError("UNSUPPORTED_DEVICE: GATT history requires the supported scale")
+    cloud = await _target(hass, account_id, device)
+    rows = await cloud.async_get_devices(renew=False)
+    iterable = rows.values() if isinstance(rows, dict) else rows or []
+    targets = [row for row in iterable if isinstance(row, dict)
+               and str(row.get("did")) == device.did
+               and _mac(row.get("mac")) == device.mac
+               and row.get("model") == device.model]
+    tokens = {row.get("token") for row in targets if row.get("token")}
+    if len(tokens) != 1:
+        raise ProviderError("BLE_TOKEN_UNAVAILABLE: target metadata has no unique token")
+    token = tokens.pop()
+    if not isinstance(token, str) or not re.fullmatch(r"[0-9a-fA-F]{24}", token):
+        raise ProviderError("BLE_TOKEN_UNAVAILABLE: expected a 12-byte Standard Auth token")
+    return bytes.fromhex(token)
+
+
 async def report_co2(hass, account_id, device: DeviceRef, value: int) -> None:
     if not isinstance(device, DeviceRef) or device.model != CO2_MODEL:
         raise ProviderError("UNSUPPORTED_UPLOAD: this property-report method only supports CO2")

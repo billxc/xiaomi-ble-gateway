@@ -43,6 +43,8 @@ async def async_get_config_entry_diagnostics(hass, entry):
                 weight_references=runtime.weight_references.get(mac),
                 reference_error=runtime.reference_error.get(mac),
                 snapshot_at=runtime.snapshot_at.get(mac),
+                scale_history=(dict(runtime._history.status)
+                               if runtime._history is not None else {"status": "not_started"}),
             )
         info = cached.get(mac)
         if info is not None and FE95_UUID in info.service_data:

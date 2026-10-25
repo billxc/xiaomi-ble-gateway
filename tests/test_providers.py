@@ -138,6 +138,27 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             raw = base64.b64encode(raw.encode()).decode()
         self.cloud.session.reply = Response(raw, status)
 
+    async def test_target_scale_ble_token_is_ram_only(self):
+        row = metadata(model=p.SCALE_MODEL)
+        row["token"] = bytes(range(12)).hex()  # Deliberately public synthetic token.
+        self.cloud.rows = [row]
+        self.entry.cloud_devices = {DID: row}
+        device = p.DeviceRef(MAC, DID, p.SCALE_MODEL, "Synthetic scale")
+        self.assertEqual(await p.get_scale_ble_token(self.hass, "auto", device), bytes(range(12)))
+        self.assertNotIn(row["token"], repr(device))
+        self.assertEqual(self.cloud.session.calls, [])
+
+    async def test_scale_ble_token_rejects_bindkey_and_conflicts(self):
+        device = p.DeviceRef(MAC, DID, p.SCALE_MODEL, "Synthetic scale")
+        for tokens in ([bytes(range(16)).hex()], [""],
+                       [bytes(range(12)).hex(), bytes(reversed(range(12))).hex()]):
+            self.cloud.rows = [{**metadata(model=p.SCALE_MODEL), "token": token}
+                               for token in tokens]
+            self.entry.cloud_devices = {DID: self.cloud.rows[0]}
+            with self.assertRaises(p.ProviderError):
+                await p.get_scale_ble_token(self.hass, "auto", device)
+        self.assertEqual(self.cloud.session.calls, [])
+
     async def test_loaded_cache_and_home_metadata_merge(self):
         self.entry.cloud_devices[DID].pop("mac")
         self.home(rows={DID: metadata(mac="12:34:56:78:9a:bc", name="Home name")})

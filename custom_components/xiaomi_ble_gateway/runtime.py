@@ -74,6 +74,7 @@ class GatewayRuntime:
         self._unsubs = []
         self._worker = None
         self._reference_task = None
+        self._history = None
         self._closing = False
         self._started_at = None
         self.received_packets = {mac: 0 for mac in self.devices}
@@ -86,6 +87,12 @@ class GatewayRuntime:
         self.weight_references = {}
         self.reference_error = {}
         self.snapshot_at = {}
+
+    async def async_pull_scale_history(self, mac):
+        if self._history is None:
+            from .history_runtime import ScaleHistoryCoordinator
+            self._history = ScaleHistoryCoordinator(self)
+        return await self._history.async_pull(mac)
 
     def signal(self, mac):
         return f"{DOMAIN}_{self.entry.entry_id}_{mac}"
@@ -189,6 +196,10 @@ class GatewayRuntime:
             return
         if frame is None or frame.product_id != MODEL_PIDS[device.model]:
             return
+        if self._history is not None and device.model == SCALE_MODEL:
+            # Separate local observations, including authenticated repeats from
+            # different receivers. Never create an upload from a GATT record.
+            self._history.observe(mac, frame, service_info.source, received_at)
         state = self.states[mac]
         observation = state.observe(frame.counter, frame.readings)
         if observation is Observation.OLD:
@@ -392,6 +403,8 @@ class GatewayRuntime:
             self._reference_task.cancel()
         if self._worker is not None:
             self._worker.cancel()
+        if self._history is not None:
+            await self._history.async_stop()
         if self._reference_task is not None:
             with suppress(asyncio.CancelledError):
                 await self._reference_task

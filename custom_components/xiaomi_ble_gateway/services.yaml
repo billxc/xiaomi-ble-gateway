@@ -1,0 +1,21 @@
+pull_scale_history:
+  name: Pull scale history through ESPHome
+  description: >-
+    Authenticate the configured scale through one active ESPHome Bluetooth proxy,
+    request offline history once, and merge it into the private local history
+    database. Wake the scale first. Does not upload history, confirm/delete
+    offline records, set the clock, synchronize users, or pair the device.
+    Subsequent authenticated broadcasts are observed locally until reload.
+  fields:
+    config_entry_id:
+      name: Gateway entry
+      required: true
+      selector:
+        config_entry:
+          integration: xiaomi_ble_gateway
+    address:
+      name: Scale Bluetooth address
+      required: true
+      example: "02:00:00:00:00:01"
+      selector:
+        text:

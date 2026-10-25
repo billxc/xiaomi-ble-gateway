@@ -1,10 +1,10 @@
 {
   "domain": "xiaomi_ble_gateway",
   "name": "Xiaomi BLE Cloud Gateway",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "config_flow": true,
   "dependencies": ["bluetooth"],
-  "after_dependencies": ["xiaomi_miot", "xiaomi_home"],
+  "after_dependencies": ["esphome", "xiaomi_miot", "xiaomi_home"],
   "integration_type": "hub",
   "iot_class": "local_push",
   "codeowners": ["@billxc"],

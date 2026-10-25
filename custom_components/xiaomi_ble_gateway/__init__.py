@@ -15,6 +15,8 @@ PLATFORMS = [Platform.SENSOR]
 async def async_setup(hass, config) -> bool:
     # Recording must not depend on successful Miot/account/bindkey setup.
     await get_recorder_manager(hass).async_start()
+    from .history_runtime import async_register_services
+    async_register_services(hass)
     return True
 
 

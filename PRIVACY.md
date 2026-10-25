@@ -14,6 +14,17 @@ The default retention is three days. TTL cleanup runs while recording is active.
 
 Disable recording if this collection is not appropriate. Manage consent and retention according to your environment and applicable rules.
 
+## Explicit scale-history pulls
+
+The `pull_scale_history` action saves complete native scale records in a separate
+`scale_history.sqlite3` file. This can include profile identifiers, weight and
+native body-composition results. **There is no automatic TTL** for this health
+history; raw-recorder retention does not apply. Reload/removal does not delete
+it. After a pull, local authenticated broadcast observations are also recorded
+until reload for candidate association. Neither historical records nor merge
+updates authorize cloud writes or scale-history clearing. See
+[Scale history](docs/SCALE-HISTORY.md).
+
 ## HA entities and diagnostics
 
 HA's own Recorder may store entities and their attributes independently of this integration's raw database. Scale-match summaries can include profile names/IDs and reference weights. RAM-only integration metadata can therefore still appear in HA history or exported diagnostics.
